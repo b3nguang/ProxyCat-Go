@@ -33,7 +33,7 @@ func init() {
 func loadProxies(filePath string) []string {
 	file, err := os.Open(filePath)
 	if err != nil {
-		logger.Fatal("Error loading proxy file:", err)
+		logger.Fatal("🏳 Error loading proxy file:", err)
 	}
 	defer file.Close()
 
@@ -44,7 +44,7 @@ func loadProxies(filePath string) []string {
 	}
 
 	if err := scanner.Err(); err != nil {
-		logger.Fatal("Error reading proxy file:", err)
+		logger.Fatal("🏳 Error reading proxy file:", err)
 	}
 	return proxies
 }
@@ -60,7 +60,7 @@ func rotateProxies(interval time.Duration) {
 		} else if rotateMode == "once" && proxyIndex < len(proxies)-1 {
 			proxyIndex++
 		}
-		logger.Info("Switched to proxy:", proxies[proxyIndex])
+		logger.Info("🔀 Switched to proxy:", proxies[proxyIndex])
 		mu.Unlock()
 	}
 }
@@ -86,8 +86,8 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	proxyURL, err := url.Parse(currentProxy)
 	if err != nil {
-		http.Error(w, "Invalid proxy URL", http.StatusInternalServerError)
-		logger.Error("Invalid proxy URL:", err)
+		http.Error(w, "🏳 Invalid proxy URL", http.StatusInternalServerError)
+		logger.Error("🏳 Invalid proxy URL:", err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	req, err := http.NewRequest(r.Method, completeURL, r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("Failed to create new request:", err)
+		logger.Error("🏳 Failed to create new request:", err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("Request failed:", err)
+		logger.Error("🏳 Request failed:", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -129,7 +129,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("Failed to copy response body:", err)
+		logger.Error("🏳 Failed to copy response body:", err)
 		return
 	}
 
@@ -150,14 +150,14 @@ func connectHandler(w http.ResponseWriter, r *http.Request) {
 	dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("Failed to create dialer:", err)
+		logger.Error("🏳 Failed to create dialer:", err)
 		return
 	}
 
 	destConn, err := dialer.Dial("tcp", r.Host)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("Failed to dial destination:", err)
+		logger.Error("🏳 Failed to dial destination:", err)
 		return
 	}
 	defer destConn.Close()
@@ -165,13 +165,13 @@ func connectHandler(w http.ResponseWriter, r *http.Request) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "Webserver doesn't support hijacking", http.StatusInternalServerError)
-		logger.Error("Webserver doesn't support hijacking")
+		logger.Error("🏳 Webserver doesn't support hijacking")
 		return
 	}
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("Hijacking failed:", err)
+		logger.Error("🏳 Hijacking failed:", err)
 		return
 	}
 	defer clientConn.Close()
