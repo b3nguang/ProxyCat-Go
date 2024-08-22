@@ -45,3 +45,6 @@ ProxyCat-Go 启动后，将会在指定端口监听 HTTP/HTTPS 请求。你可�
 ## 🙏 五、参考项目
 
 [https://github.com/honmashironeko/ProxyCat](https://github.com/honmashironeko/ProxyCat)
+
+在这里向 `ProxyCat` 项目献上最诚挚的敬意。
+
