@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/b3nguang/ProxyCat-Go/pkg/logger"
+	"github.com/gin-gonic/gin"
+	"golang.org/x/net/proxy"
 	"io"
 	"net"
 	"net/http"
@@ -12,8 +14,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"golang.org/x/net/proxy"
 )
 
 var (
@@ -80,129 +80,124 @@ func buildCompleteURL(r *http.Request) string {
 	return fmt.Sprintf("%s://%s%s", "http", r.Host, r.URL.RequestURI())
 }
 
-// ProxyHandler 处理HTTP代理请求
-func proxyHandler(w http.ResponseWriter, r *http.Request) {
-	currentProxy := getCurrentProxy()
+// ProxyMiddleware 处理HTTP代理请求的中间件
+func proxyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		currentProxy := getCurrentProxy()
 
-	proxyURL, err := url.Parse(currentProxy)
-	if err != nil {
-		http.Error(w, "🏳 Invalid proxy URL", http.StatusInternalServerError)
-		logger.Error("🏳 Invalid proxy URL:", err)
-		return
-	}
-
-	logger.Info("🙋‍ Handling request:", r.Method, r.URL.String(), "via proxy:", currentProxy)
-
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
-	}
-
-	client := &http.Client{Transport: transport}
-	completeURL := buildCompleteURL(r)
-	req, err := http.NewRequest(r.Method, completeURL, r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("🏳 Failed to create new request:", err)
-		return
-	}
-
-	for name, values := range r.Header {
-		for _, value := range values {
-			req.Header.Add(name, value)
+		proxyURL, err := url.Parse(currentProxy)
+		if err != nil {
+			c.String(http.StatusInternalServerError, "🏳 Invalid proxy URL")
+			logger.Error("🏳 Invalid proxy URL:", err)
+			c.Abort()
+			return
 		}
-	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("🏳 Request failed:", err)
-		return
-	}
-	defer resp.Body.Close()
+		logger.Info("🙋‍ Handling request:", c.Request.Method, c.Request.URL.String(), "via proxy:", currentProxy)
 
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Set(key, value)
+		transport := &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
 		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error("🏳 Failed to copy response body:", err)
-		return
-	}
 
-	logger.Info("📡 Response:", r.URL.String(), resp.StatusCode)
+		client := &http.Client{Transport: transport}
+		completeURL := buildCompleteURL(c.Request)
+		req, err := http.NewRequest(c.Request.Method, completeURL, c.Request.Body)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			logger.Error("🏳 Failed to create new request:", err)
+			c.Abort()
+			return
+		}
+
+		for name, values := range c.Request.Header {
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			logger.Error("🏳 Request failed:", err)
+			c.Abort()
+			return
+		}
+		defer resp.Body.Close()
+
+		for key, values := range resp.Header {
+			for _, value := range values {
+				c.Header(key, value)
+			}
+		}
+		c.Status(resp.StatusCode)
+		_, err = io.Copy(c.Writer, resp.Body)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			logger.Error("🏳 Failed to copy response body:", err)
+			c.Abort()
+			return
+		}
+
+		logger.Info("📡 Response:", c.Request.URL.String(), resp.StatusCode)
+	}
 }
 
-func connectHandler(w http.ResponseWriter, r *http.Request) {
+// ConnectHandler 处理CONNECT请求
+func connectHandler(c *gin.Context) {
 	currentProxy := getCurrentProxy()
 	proxyURL, err := url.Parse(currentProxy)
 	if err != nil {
-		http.Error(w, "Invalid proxy URL", http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, "Invalid proxy URL")
 		logger.Error("🏳 Invalid proxy URL:", err)
 		return
 	}
 
-	logger.Info("Handling CONNECT request:", r.Host, "via proxy:", currentProxy)
+	logger.Info("Handling CONNECT request:", c.Request.Host, "via proxy:", currentProxy)
 
 	dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, err.Error())
 		logger.Error("🏳 Failed to create dialer:", err)
 		return
 	}
 
-	destConn, err := dialer.Dial("tcp", r.Host)
+	destConn, err := dialer.Dial("tcp", c.Request.Host)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, err.Error())
 		logger.Error("🏳 Failed to dial destination:", err)
 		return
 	}
 	defer destConn.Close()
 
-	hijacker, ok := w.(http.Hijacker)
+	hijacker, ok := c.Writer.(http.Hijacker)
 	if !ok {
-		http.Error(w, "Webserver doesn't support hijacking", http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, "Webserver doesn't support hijacking")
 		logger.Error("🏳 Webserver doesn't support hijacking")
 		return
 	}
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, err.Error())
 		logger.Error("🏳 Hijacking failed:", err)
 		return
 	}
 	defer clientConn.Close()
 
-	w.WriteHeader(http.StatusOK)
+	c.Status(http.StatusOK)
 
 	go transfer(destConn, clientConn)
 	go transfer(clientConn, destConn)
 
-	logger.Info("🎉 CONNECT established for:", r.Host)
+	logger.Info("🎉 CONNECT established for:", c.Request.Host)
 }
 
+// Transfer 数据传输
 func transfer(destination net.Conn, source net.Conn) {
 	defer destination.Close()
 	defer source.Close()
 	_, err := io.Copy(destination, source)
 	if err != nil {
 		logger.Error("🏳 Error during data transfer:", err)
-	}
-}
-
-func startProxyServer(port int) {
-	http.HandleFunc("/", proxyHandler)
-	http.HandleFunc("/connect", connectHandler)
-
-	address := fmt.Sprintf(":%d", port)
-	server := &http.Server{Addr: address}
-
-	logger.Info("😀 Starting proxy server on port:", port)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Fatal("🏳 Could not listen on", address, ":", err)
 	}
 }
 
@@ -222,8 +217,16 @@ func main() {
 
 	go rotateProxies(rotateInterval)
 
+	// 创建 Gin Engine 并禁用 Gin 的默认日志中间件
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+
+	// 添加自定义的日志中间件
+	r.Use(proxyMiddleware())
+	r.Any("/connect", connectHandler)
+
 	logger.Info("🚀 Listening on port:", *port, "Proxy rotation mode:", *mode, "Proxy rotation interval:", *interval, "seconds")
 	logger.Info("🤝 Initial proxy:", getCurrentProxy())
 
-	startProxyServer(*port)
+	r.Run(fmt.Sprintf(":%d", *port))
 }
